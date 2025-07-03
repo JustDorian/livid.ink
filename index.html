@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LIVID.INK - Colour or Emotion...</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html, body {
+      margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%;
+      background: linear-gradient(to bottom, #3B4A59, #1E2A33);
+      font-family: 'Segoe UI', sans-serif;
+    }
+    #overlay {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center; color: white; pointer-events: none; z-index: 2;
+    }
+    #overlay h1 {
+      font-size: 4rem; margin: 0; letter-spacing: 0.1em;
+    }
+    #overlay p {
+      margin-top: 0.5em; opacity: 0.7;
+    }
+    @media(max-width:600px){
+      #overlay h1 { font-size: 2rem; }
+      #overlay p  { font-size: 1rem; }
+    }
+    canvas {
+      position: fixed;
+    }
+    canvas#webgl {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay">
+    <h1>LIVID.INK</h1>
+
+    <h1>livid.ink</h1>
+    <p>Colour or Emotion…</p>
+  </div>
+  <canvas id="webgl"></canvas>
+
+  <!-- WTCGL helper -->
+  <script src="WTCGL.js"></script>
+
+  <!-- Vertex Shader -->
+  <script id="vertexShader" type="x-shader/x-vertex">
+    attribute vec4 a_position;
+    void main() {
+      gl_Position = a_position;
+    }
+  </script>
+
+  <!-- Fragment Shader -->
+  <script id="fragmentShader" type="x-shader/x-fragment">
+    precision highp float;
+    precision highp int;
+
+    uniform vec2 u_resolution;
+    uniform vec2 u_mouse;
+    uniform float u_time;
+
+    const int maxIterations = 256;
+    const float stopThreshold = 0.001;
+    const float stepScale = 0.8;
+    // theme colours
+    const vec3 bgTop    = vec3(0.23, 0.29, 0.37);
+    const vec3 bgBottom = vec3(0.12, 0.16, 0.20);
+    // accent blue
+    const vec3 lightCol = vec3(0.8, 0.9, 1.0);
+
+    const int octaves = 3;
+
+    float bumps(vec3 p, float phase, float size, vec3 freq) {
+      return size 
+        * sin(p.x * freq.x + phase)
+        * cos(p.y * freq.y + phase)
+        * cos(p.z * freq.z + phase);
+    }
+
+    float fractalBumps(vec3 p, float phase, float size, vec3 freq, float mult) {
+      float sum = bumps(p, phase, size, freq);
+      for(int i = 1; i < octaves; i++){
+        float f = float(i);
+        sum += bumps(p, phase + f*10.0, size*mult/f, freq*f);
+      }
+      return sum;
+    }
+
+    float worldDist(vec3 pos, out int id) {
+      vec3 cell = floor(pos * 0.5);
+      id = int(cell.x + cell.y + cell.z);
+      float grad = max(0.0, pos.y + 0.3);
+      float fb = fractalBumps(pos, u_time * 10.0, 0.5 * grad, vec3(10.0 + sin(u_time)*5.0), 4.8);
+      return length(pos) - 0.4 + fb * 0.15;
+    }
+
+    float worldDist(vec3 pos) {
+      int dummy;
+      return worldDist(pos, dummy);
+    }
+
+    vec3 rayMarch(vec3 ro, vec3 rd) {
+      float depth = 0.0;
+      vec3 col = vec3(0.0);
+      for(int i = 0; i < maxIterations; i++){
+        vec3 p = ro + rd * depth;
+        float d = worldDist(p);
+        vec3 n = normalize(p);
+        vec3 ld = normalize(vec3(0.0, 1.0, -1.0));
+        float diff = max(dot(n, ld), 0.0) + 0.2;
+        col += lightCol * diff * 0.02 / float(i + 1);
+        if(d < stopThreshold) {
+          depth += 0.04;
+        } else {
+          depth += d * stepScale;
+        }
+        if(depth > 32.0) break;
+      }
+      return sqrt(col);
+    }
+
+    void main(){
+      vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution)
+                / min(u_resolution.x, u_resolution.y);
+
+      // Gradient background
+      float gy = gl_FragCoord.y / u_resolution.y;
+      vec3 color = mix(bgBottom, bgTop, gy);
+
+      // Camera setup (mouse effect reduced)
+      vec2 m = u_mouse * 0.03;  // scale down mouse
+      vec3 cam = vec3(
+        cos(m.x * 5.0) * 3.0,
+        m.y * 3.0,
+        sin(m.x * 5.0) * 3.0
+      );
+      vec3 center = vec3(0.0);
+      vec3 fwd = normalize(center - cam);
+      vec3 rt  = normalize(vec3(fwd.z, 0.0, -fwd.x));
+      vec3 up  = normalize(cross(fwd, rt));
+      float FOV = 0.4;
+      vec3 rd = normalize(fwd + uv.x * FOV * rt + uv.y * FOV * up);
+
+      // Boost fractal
+      color += rayMarch(cam, rd) * 1.8;
+
+      gl_FragColor = vec4(color, 1.0);
+    }
+  </script>
+
+  <script>
+    const canvas = document.getElementById('webgl');
+    const app = new WTCGL({
+      el: canvas,
+      vertexShaderSource: document.getElementById('vertexShader').textContent,
+      fragmentShaderSource: document.getElementById('fragmentShader').textContent,
+      width: window.innerWidth,
+      height: window.innerHeight,
+      pxratio: window.devicePixelRatio
+    });
+
+    // Mouse very lightly applied
+    let mouse = [0, 0];
+    window.addEventListener('pointermove', e => {
+      mouse[0] = (e.clientX / window.innerWidth  - 0.5) * 2.0 * 0.2;
+      mouse[1] = (1.0 - e.clientY / window.innerHeight - 0.5) * 2.0 * 0.2;
+      app.addUniform('mouse', WTCGL.TYPE_V2, mouse);
+    });
+
+    window.addEventListener('resize', () => {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+      app.resize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+  <script src="script.js"></script>
+
+</body>
+</html>
