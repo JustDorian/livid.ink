@@ -147,7 +147,7 @@
 
       // clamp colours
       vec3 rayColor = rayMarch(cam, rd) * 1.8;
-      color = mix(color, rayColor, 0.7);  // 0.5 = equal blend 0.7 more glow
+      color = mix(color, rayColor, 0.3);  // 0.5 = equal blend 0.7 more glow
 
 
       gl_FragColor = vec4(color, 1.0);
